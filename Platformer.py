@@ -74,9 +74,11 @@ class Player(pygame.sprite.Sprite):
         self.jump_count = 0
         self.hit = False
         self.hit_count = 0
+        self.jump_height = 8
+        self.sprite = None
 
     def jump(self):
-        self.y_vel = -self.GRAVITY * 8
+        self.y_vel = -self.GRAVITY * self.jump_height
         self.animation_count = 0
         self.jump_count += 1
         if self.jump_count == 1:
@@ -219,8 +221,8 @@ def get_background(name):
     _, _, width, height = image.get_rect()
     tiles = []
 
-    for i in range(-width, WIDTH + width // width + 1):
-        for j in range(HEIGHT // height + 1):
+    for i in range(WIDTH // width + 1):
+        for j in range(HEIGHT // height + 65):
             pos = (i * width, j * height)
             tiles.append(pos)
 
@@ -229,29 +231,33 @@ def get_background(name):
 
 def get_border():
     surface = get_block(96)
+    image = pygame.Surface((96, 96), pygame.SRCALPHA)
+    image.blit(surface, (0, 0))
     border = []
     for i in range(-96, (HEIGHT + 96) // 97):
-        border.append((WIDTH - 96, i * 96))
-        border.append((0, i * 96))
+        border.append((WIDTH - 30, i * 96))
+        border.append((-66, i * 96))
 
-    return border, surface
+    return border, image
 
 
-def draw(win, background, bg_image, player, objects, border, border_block, offset_y):  # , offset_x):
+def draw(win, background, bg_image, player, objects, border, border_block, offset_y, blocks):  # , offset_x):
     for tile in background:
-        #  win.blit(bg_image, (tile[0] - ((offset_x / 10) % bg_image.get_width()), tile[1]))
-        win.blit(bg_image, tile)
+        win.blit(bg_image, (tile[0], tile[1] - ((offset_y / 10) % bg_image.get_height())))
+        #  win.blit(bg_image, tile)
 
     flip_it = True
     for block in border:
         if flip_it:
-            win.blit(pygame.transform.rotate(border_block, 90), block)
-            flip_it = -flip_it
+            win.blit(pygame.transform.rotate(border_block, 90), (block[0], block[1] - offset_y/2))
+            flip_it = False
         else:
-            win.blit(pygame.transform.rotate(border_block, 180), block)
-            flip_it = -flip_it
+            win.blit(pygame.transform.rotate(border_block, 270), (block[0], block[1] - offset_y/2))
+            flip_it = True
     for obj in objects:
-        obj.draw(window, offset_y)  # , offset_x)
+        obj.draw(win, offset_y)  # , offset_x)
+    for block in blocks:
+        block.draw(win, offset_y)
 
     player.draw(win, offset_y)  # , offset_x)
 
@@ -291,18 +297,28 @@ def handle_vertical_collision(player, objects, dy):
     return collided_objects
 
 
-def handle_move(player, objects):
+def generate_blocks(blocks, block_size):
+    blocks.clear()
+    blocks = [
+        Block(random.randrange(30, WIDTH - block_size + 30), (HEIGHT // 2 - block_size) - (block_size * (i + 1) * 3),
+              block_size)
+        for i in range(100)]
+    return blocks
+
+
+def handle_move(player, objects, blocks):
+    all_objects = [*objects, *blocks]
     keys = pygame.key.get_pressed()
     player.x_vel = 0
-    collide_left = collide(player, objects, -PLAYER_VEL)
-    collide_right = collide(player, objects, PLAYER_VEL)
+    collide_left = collide(player, all_objects, -PLAYER_VEL)
+    collide_right = collide(player, all_objects, PLAYER_VEL)
 
     if keys[pygame.K_a] and not collide_left:
         player.move_left(PLAYER_VEL)
     if keys[pygame.K_d] and not collide_right:
         player.move_right(PLAYER_VEL)
 
-    vertical_collide = handle_vertical_collision(player, objects, player.y_vel)
+    vertical_collide = handle_vertical_collision(player, all_objects, player.y_vel)
 
     to_check = [collide_left, collide_right, *vertical_collide]
     for obj in to_check:
@@ -332,10 +348,9 @@ def main(win):
     fire.on()
     floor = [Block(i * block_size, HEIGHT // 2 - block_size, block_size)
              for i in range(-WIDTH // block_size, WIDTH * 2 // block_size)]
-    blocks = [
-        Block(random.randrange(0, WIDTH - block_size), (HEIGHT // 2 - block_size) - (block_size * i * 3), block_size)
-        for i in range(100)]
-    objects = [*floor, *blocks]
+    blocks = []
+    blocks = generate_blocks(blocks, block_size)
+    objects = [*floor]
 
     offset_x = 0
     offset_y = 0
@@ -347,8 +362,18 @@ def main(win):
         clock.tick(FPS)
         game_tick += 1
 
-        if (game_tick % 1000 == 0):
+        if player.rect.y - offset_y > HEIGHT:
+            game_tick = 0
+            offset_y = 0
+            scroll_speed = 5
+            player.rect.x = WIDTH // 2
+            player.rect.y = HEIGHT // 2 - block_size
+            blocks = generate_blocks(blocks, block_size)
+            player.jump_height = 8
+
+        if game_tick % 1000 == 0:
             scroll_speed += 1
+            player.jump_height += 1
         offset_y -= scroll_speed
 
         for event in pygame.event.get():
@@ -362,8 +387,8 @@ def main(win):
 
         player.loop(FPS)
         fire.loop()
-        handle_move(player, objects)
-        draw(win, background, bg_image, player, objects, border, border_block, offset_y)  # , offset_x)
+        handle_move(player, objects, blocks)
+        draw(win, background, bg_image, player, objects, border, border_block, offset_y, blocks)  # , offset_x)
 
         if (((player.rect.right - offset_x >= WIDTH - scroll_area_width) and player.x_vel > 0)
                 or ((player.rect.left - offset_x <= scroll_area_width) and player.x_vel < 0)):
